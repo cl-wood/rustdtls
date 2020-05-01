@@ -68,7 +68,7 @@ mod tests {
             let id = (
                 record::epoch_from_record(record.clone()),
                 record::sequence_number_from_record(record.clone()).expect("sequence_number_from_record failed"),
-                handshake::message_seq_from_record(record.clone()),
+                handshake::message_seq_from_record(record.clone()).expect("message_seq_from_record failed"),
             );
             fragments.insert(id, record.clone());
         }

@@ -2,7 +2,10 @@ extern crate dtls;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::{Command, Stdio};
+use std::str::from_utf8;
 use std::{thread, time};
+
+use std::io::prelude::*;
 
 /// Verify client connections using OpenSSL server.
 #[tokio::test]
@@ -24,21 +27,32 @@ async fn handshake_with_openssl() {
         .spawn()
         .expect("failed to execute server. Maybe OpenSSL is not installed?");
 
+    let stdin = server.stdin.as_mut().expect("get stdin failed");
+    stdin.write(b"Hello, DTLS client!\n").expect("write failed");
+
     // Give server time to probably receive msg, then kill it and check
     thread::sleep(time::Duration::from_secs(1));
 
+    // Create client, send data
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
     let udp_transport = dtls::transport::udp::Udp::new(socket_addr, "127.0.0.1:0").expect("failed to create udp transport");
 
     let mut client = dtls::client::Client::new(&udp_transport).expect("failed to create client");
-    client.send_client_hello().expect("failed to send ClientHello");
-    client.recv_hello_verify_request().expect("failed to receive HelloVerifyRequest");
-    client.send_client_hello().expect("failed to send ClientHello with cookie");
-    client.recv_flight_4().expect("recv flight 4 failed");
-    client.send_flight_5().expect("send flight 5 failed");
-    client.recv_flight_6().expect("recv flight 6 failed");
+    client.write(b"CLIENT DATA").expect("write application data failed");
+
+    // Check expected read data
+    let mut buf = [0; 100];
+    let n = client.read(&mut buf).expect("read application data failed");
+    let buf = &mut buf[..n];
+    let input = from_utf8(&buf).expect("string from_utf8 failed");
+    assert!(input.contains("Hello, DTLS client!"));
 
     thread::sleep(time::Duration::from_secs(1));
-
     server.kill().expect("server cannot be killed");
+
+    // Check expected write data
+    let mut output = String::new();
+    let mut stdout = server.stdout.expect("stdout failed");
+    stdout.read_to_string(&mut output).expect("read_to_string failed");
+    assert!(output.contains("CLIENT DATA"));
 }

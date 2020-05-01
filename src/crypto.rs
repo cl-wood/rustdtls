@@ -6,7 +6,7 @@ use crate::pack::Pack;
 use crate::record::{ContentType, Epoch, ProtocolVersion, SequenceNumber};
 
 use aes::Aes256;
-use block_modes::block_padding::NoPadding;
+use block_modes::block_padding::{NoPadding, Pkcs7};
 use block_modes::{BlockMode, Cbc};
 use ring::agreement::{EphemeralPrivateKey, PublicKey, X25519};
 //use ring::error::Unspecified;
@@ -64,13 +64,13 @@ impl SecurityParameters {
         cipher_name: cipher::CipherName,
         compression_algorithm: handshake::CompressionMethod,
         handshake_parameters: HandshakeParameters,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, errors::DTLSError> {
+        Ok(Self {
             entity,
-            cipher_parameters: cipher::parameters(cipher_name),
+            cipher_parameters: cipher::parameters(cipher_name)?,
             compression_algorithm,
             handshake_parameters,
-        }
+        })
     }
 }
 
@@ -124,14 +124,17 @@ impl KeyBlock {
 // TODO from rustls
 pub fn ephemeral_keys() -> Result<(PublicKey, EphemeralPrivateKey), errors::DTLSError> {
     let rng = ring::rand::SystemRandom::new();
-    let our_private_key = EphemeralPrivateKey::generate(&X25519, &rng).unwrap();
-    let our_pubkey = our_private_key.compute_public_key().unwrap(); // TODO handle unspecified error from unwraps (use ring::error::Unspecified;)
+    let our_private_key = EphemeralPrivateKey::generate(&X25519, &rng).map_err(|_| errors::DTLSError::UnspecifiedRingError)?;
+    let our_pubkey = our_private_key
+        .compute_public_key()
+        .map_err(|_| errors::DTLSError::UnspecifiedRingError)?;
     Ok((our_pubkey, our_private_key))
 }
 
 pub fn shared_secret(our_private_key: EphemeralPrivateKey, their_pub_key_bytes: &[u8]) -> Result<Vec<u8>, errors::DTLSError> {
     let their_pub_key = ring::agreement::UnparsedPublicKey::new(&X25519, their_pub_key_bytes);
-    let shared_secret = ring::agreement::agree_ephemeral(our_private_key, &their_pub_key, (), |result| Ok(result.to_vec())).unwrap();
+    let shared_secret = ring::agreement::agree_ephemeral(our_private_key, &their_pub_key, (), |result| Ok(result.to_vec()))
+        .map_err(|_| errors::DTLSError::UnspecifiedRingError)?;
 
     Ok(shared_secret)
 }
@@ -167,7 +170,11 @@ pub fn mac(
     };
     let algorithm = match security_parameters.cipher_parameters.mac_algorithm {
         cipher::MACAlgorithm::HmacSha1 => hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
-        _ => panic!("TODO add other cases"), // TODO handle the other cases
+        _ => {
+            return Err(errors::DTLSError::MACAlgorithmNotSupportedError(
+                security_parameters.cipher_parameters.mac_algorithm,
+            ))
+        }
     };
 
     let key = hmac::Key::new(algorithm, write_mac_key);
@@ -296,6 +303,26 @@ pub fn encrypt_then_mac(
     Ok([iv, ciphertext, &mac].concat())
 }
 
+pub fn decrypt(
+    iv: &[u8],
+    ciphertext: &[u8],
+    mac: &[u8],
+    security_parameters: &SecurityParameters,
+    key_block: &KeyBlock,
+) -> Result<Vec<u8>, errors::DTLSError> {
+    type Aes256Cbc = Cbc<Aes256, NoPadding>;
+    let cipher = Aes256Cbc::new_var(&key_block.server_write_key, &iv)?;
+
+    println!("IV: len({}), {:x?}", iv.len(), iv);
+    println!("Ciphertext: len({}), {:x?}", ciphertext.len(), ciphertext);
+    println!("MAC: len({}), {:x?}", mac.len(), mac);
+
+    let plaintext = &cipher.decrypt_vec(&ciphertext)?;
+    println!("Plaintext: {:x?}", plaintext);
+
+    Ok(plaintext.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::cipher;
@@ -415,23 +442,22 @@ mod tests {
         };
         let security_parameters = crypto::SecurityParameters::new(
             crypto::ConnectionEnd::Client,
-            cipher::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+            cipher::TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
             handshake::CompressionMethod::Null,
             handshake_parameters,
-        );
+        )
+        .expect("SecurityParameters failed");
         let key_block = crypto::KeyBlock::new(security_parameters.clone()).expect("building KeyBlock failed");
 
-        let mut dtls = dtls::Dtls::new();
-        let finished = dtls
-            .finished(
-                fields::Uint16(3),
-                fields::Uint16(1),
-                fields::Uint48([0; 6]),
-                client_verify_data,
-                &security_parameters,
-                &key_block,
-            )
-            .expect("building finished message failed");
+        let finished = dtls::Dtls::finished(
+            fields::Uint16(3),
+            fields::Uint16(1),
+            fields::Uint48([0; 6]),
+            client_verify_data,
+            &security_parameters,
+            &key_block,
+        )
+        .expect("building finished message failed");
 
         let expected_encrypted_finished = hex::decode("16fefd0001000000000000004488e1762a41488a96b0cb44ebcaadecbb95a0cbc732800c1e50cbecaa09b55d0873e4278eb416b3bc6ee174ea95be16d0a64d73c237bd88e4470ad24f9d86c143fe57dcb4").expect("decode encrypted finished failed");
         let finished_iv = &expected_encrypted_finished

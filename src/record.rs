@@ -299,18 +299,17 @@ struct DTLSCompressed {
 
 #[derive(Clone, Debug)]
 pub struct DTLSCiphertext {
-    r#type: ContentType,
-    version: ProtocolVersion,
-    epoch: Epoch,
-    sequence_number: SequenceNumber,
-    length: Length,
-    fragment: GenericBlockCipher,
+    pub r#type: ContentType,
+    pub version: ProtocolVersion,
+    pub epoch: Epoch,
+    pub sequence_number: SequenceNumber,
+    pub length: Length,
+    pub fragment: GenericBlockCipher,
 }
 
 impl DTLSCiphertext {
     // TODO can use this to create from DTLSCompressed, SecurityParameters, KeyBlock, and have DTLSCompressed new take a Plaintext
     // Basicically move from_dtls_plaintext() to new()
-    #[allow(dead_code)]
     pub fn new(
         r#type: ContentType,
         version: ProtocolVersion,
@@ -377,6 +376,24 @@ impl DTLSCiphertext {
         let encrypted_block: Vec<fields::Uint8> = ciphered_block.into_iter().map(|i| fields::Uint8(i)).collect();
         v.extend_from_slice(&encrypted_block.pack());
         Ok(v)
+    }
+
+    pub fn decrypt(
+        ciphertext: &[u8],
+        security_parameters: &crypto::SecurityParameters,
+        key_block: &crypto::KeyBlock,
+    ) -> Result<Vec<u8>, errors::DTLSError> {
+        let iv_length = security_parameters.cipher_parameters.record_iv_length.0 as usize;
+        let mac_length = security_parameters.cipher_parameters.mac_length.0 as usize;
+        let iv = &ciphertext[..iv_length];
+        let c = &ciphertext[iv_length..ciphertext.len() - mac_length];
+        let mac = &ciphertext[mac_length..];
+
+        let plaintext = crypto::decrypt(iv, c, mac, security_parameters, key_block)?;
+
+        // TODO
+
+        Ok(plaintext)
     }
 }
 
@@ -493,15 +510,12 @@ impl Pack for BlockCiphered {
 
 #[derive(Clone, Debug)]
 pub struct GenericBlockCipher {
-    // TODO lengths already known, and therefore shouldn't be included?
-    //iv_length: fields::Uint8,
     iv: Vec<u8>,
     block_ciphered: BlockCiphered,
 }
 impl GenericBlockCipher {
     pub fn new(block_ciphered: BlockCiphered) -> Self {
         Self {
-            //iv_length: fields::Uint8(iv.len() as u8),
             iv: Vec::new(),
             block_ciphered,
         }
@@ -510,7 +524,6 @@ impl GenericBlockCipher {
 impl Pack for GenericBlockCipher {
     fn empty() -> Self {
         Self {
-            //iv_length: fields::Uint8(0),
             iv: Vec::new(),
             block_ciphered: BlockCiphered::empty(),
         }
@@ -518,7 +531,6 @@ impl Pack for GenericBlockCipher {
 
     fn pack(&self) -> Vec<u8> {
         let mut v = Vec::new();
-        //v.extend_from_slice(&self.iv_length.pack());
         let ext: Vec<u8> = self.iv.clone();
         v.extend_from_slice(&ext);
         v.extend_from_slice(&self.block_ciphered.pack());
@@ -526,7 +538,7 @@ impl Pack for GenericBlockCipher {
     }
 
     fn unpack(&mut self, _v: &mut Vec<u8>) -> Result<Vec<u8>, errors::DTLSError> {
-        Ok(Vec::new()) // TODO
+        Ok(Vec::new()) // TODO in order to unpack iv, need to know it's length. Use new() to configure something like IV-len? Consume key_block data?
     }
 }
 

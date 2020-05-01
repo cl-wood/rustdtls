@@ -1,9 +1,14 @@
+![](https://github.com/cl-wood/rustdtls/workflows/Rust/badge.svg?branch=master)
+
 # Rust DTLS
 A Datagram TLS implementation using ring.
 
 `Rust DTLS` is a pure rust implementation of DTLS 1.2.
 
-It is intended as a drop-in replacement for [udp_dtls](https://docs.rs/udp-dtls/0.1.0/udp_dtls/) that does not rely on OpenSSL.
+It is intended to provide DTLS without OpenSSL.
+
+## Status
+Rust DTLS is currently at the proof of concept stage. It will successfully handshake and send/receive data from a server using DTLS. More to follow.
 
 ## Tests
 ```bash

@@ -90,11 +90,27 @@ pub const FRAGMENT_OFFSET_OFFSET: usize = MESSAGE_SEQ_OFFSET + size_of::<Message
 pub const FRAGMENT_LENGTH_OFFSET: usize = FRAGMENT_OFFSET_OFFSET + size_of::<FragmentOffset>();
 pub const HANDSHAKE_BODY_OFFSET: usize = FRAGMENT_LENGTH_OFFSET + size_of::<FragmentLength>();
 
+pub const APPLICATION_DATA_OFFSET: usize = HANDSHAKE_TYPE_OFFSET;
+
+// TODO, move these into record, remove "from record", operate on &[u8]s
 pub fn content_type_from_record(record: Vec<u8>) -> Result<record::ContentType, errors::DTLSError> {
     let mut content_type = record::ContentType::empty();
     let mut x = record[CONTENT_TYPE_OFFSET..CONTENT_TYPE_OFFSET + size_of::<record::ContentType>()].to_vec();
-    let _ = content_type.unpack(&mut x);
+    let _ = content_type.unpack(&mut x)?;
     Ok(content_type)
+}
+
+pub fn epoch_from_record(record: Vec<u8>) -> Result<record::Epoch, errors::DTLSError> {
+    Ok(fields::Uint16(BigEndian::read_u16(
+        &record[EPOCH_OFFSET..EPOCH_OFFSET + size_of::<record::Epoch>()],
+    )))
+}
+
+pub fn sequence_number_from_record(record: Vec<u8>) -> Result<record::SequenceNumber, errors::DTLSError> {
+    let mut seq_num = record::SequenceNumber::empty();
+    let mut x = record[SEQUENCE_NUMBER_OFFSET..SEQUENCE_NUMBER_OFFSET + size_of::<record::SequenceNumber>()].to_vec();
+    let _ = seq_num.unpack(&mut x)?;
+    Ok(seq_num)
 }
 
 #[allow(dead_code)]
@@ -106,7 +122,6 @@ pub fn record_length_from_record(record: Vec<u8>) -> Result<record::Length, erro
 }
 
 pub fn handshake_type_from_record(record: Vec<u8>) -> Option<HandshakeType> {
-    println!("value: {:x?}", record[HANDSHAKE_TYPE_OFFSET]);
     let handshake_type = HandshakeType::from_u8(record[HANDSHAKE_TYPE_OFFSET])?;
     Some(handshake_type)
 }
@@ -118,8 +133,14 @@ pub fn handshake_length_from_record(record: Vec<u8>) -> Result<Length, errors::D
     Ok(length)
 }
 
-pub fn message_seq_from_record(record: Vec<u8>) -> MessageSeq {
-    fields::Uint16(BigEndian::read_u16(&record[MESSAGE_SEQ_OFFSET..MESSAGE_SEQ_OFFSET + 2]))
+pub fn message_seq_from_record(record: Vec<u8>) -> Result<MessageSeq, errors::DTLSError> {
+    if content_type_from_record(record.clone())? == record::ContentType::Handshake {
+        Ok(fields::Uint16(BigEndian::read_u16(
+            &record[MESSAGE_SEQ_OFFSET..MESSAGE_SEQ_OFFSET + size_of::<MessageSeq>()],
+        )))
+    } else {
+        Ok(fields::Uint16(0))
+    }
 }
 
 #[allow(dead_code)]

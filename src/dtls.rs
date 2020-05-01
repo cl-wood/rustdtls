@@ -5,37 +5,28 @@ use crate::fields;
 use crate::handshake;
 use crate::handshaker;
 use crate::record::DTLSPlaintext_change_cipher_spec;
-use crate::record::{ContentType, DTLSCiphertext, DTLSPlaintext, Epoch, SequenceNumber, DTLS_1_2};
+use crate::record::{BlockCiphered, ContentType, DTLSCiphertext, DTLSPlaintext, Epoch, GenericBlockCipher, SequenceNumber, DTLS_1_2};
 
 use ring::agreement::PublicKey;
 use ring::rand;
 
-pub struct Dtls {
-    pub rand: rand::SystemRandom,
-}
+pub struct Dtls {}
 
 impl Dtls {
-    pub fn new() -> Dtls {
-        Dtls {
-            rand: rand::SystemRandom::new(),
-        }
-    }
-
     pub fn client_hello(
-        &mut self,
+        rand: &rand::SystemRandom,
         cookie: handshake::Cookie,
         message_seq: handshake::MessageSeq,
         epoch: Epoch,
         sequence_number: SequenceNumber,
     ) -> Result<DTLSPlaintext<handshake::ClientHello>, errors::DTLSError> {
-        let handshake = handshaker::client_hello(&self.rand, cookie, message_seq)?;
+        let handshake = handshaker::client_hello(rand, cookie, message_seq)?;
         let msg = DTLSPlaintext::new(ContentType::Handshake, DTLS_1_2, epoch, sequence_number, handshake)?;
         Ok(msg)
     }
 
     #[allow(dead_code)]
     pub fn hello_verify_request(
-        &mut self,
         epoch: Epoch,
         sequence_number: SequenceNumber,
     ) -> Result<DTLSPlaintext<handshake::HelloVerifyRequest>, errors::DTLSError> {
@@ -45,7 +36,6 @@ impl Dtls {
     }
 
     pub fn client_key_exchange(
-        &mut self,
         message_seq: handshake::MessageSeq,
         epoch: Epoch,
         sequence_number: SequenceNumber,
@@ -56,11 +46,7 @@ impl Dtls {
         Ok(msg)
     }
 
-    pub fn change_cipher_spec(
-        &mut self,
-        epoch: Epoch,
-        sequence_number: SequenceNumber,
-    ) -> Result<DTLSPlaintext_change_cipher_spec, errors::DTLSError> {
+    pub fn change_cipher_spec(epoch: Epoch, sequence_number: SequenceNumber) -> Result<DTLSPlaintext_change_cipher_spec, errors::DTLSError> {
         let change_cipher_spec = change_cipher_spec::ChangeCipherSpec {
             r#type: change_cipher_spec::Type::ChangeCipherSpec,
         };
@@ -76,7 +62,6 @@ impl Dtls {
     }
 
     pub fn finished(
-        &mut self,
         message_seq: handshake::MessageSeq,
         epoch: Epoch,
         sequence_number: SequenceNumber,
@@ -87,6 +72,20 @@ impl Dtls {
         let handshake = handshaker::finished(message_seq, verify_data)?;
         let plaintext = DTLSPlaintext::new(ContentType::Handshake, DTLS_1_2, epoch, sequence_number, handshake)?;
         DTLSCiphertext::from_dtls_plaintext(plaintext, security_parameters, key_block)
+    }
+
+    pub fn application_data(
+        epoch: Epoch,
+        sequence_number: SequenceNumber,
+        data: &[u8],
+        security_parameters: &crypto::SecurityParameters,
+    ) -> Result<DTLSCiphertext, errors::DTLSError> {
+        // TODO match cipher on security params
+        let block_ciphered = BlockCiphered::new(data.to_vec(), None, security_parameters.cipher_parameters.block_length.0 as usize);
+        let generic_block_cipher = GenericBlockCipher::new(block_ciphered);
+
+        let msg = DTLSCiphertext::new(ContentType::ApplicationData, DTLS_1_2, epoch, sequence_number, generic_block_cipher)?;
+        Ok(msg)
     }
 }
 

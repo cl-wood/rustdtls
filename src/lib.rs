@@ -1,7 +1,13 @@
+//!# Rust DTLS
+//! A Datagram TLS implementation using ring.
+//!
+//! `Rust DTLS` is a pure rust implementation of DTLS 1.2.
+//!
+//! It is intended to provide DTLS without OpenSSL.
+//!
+
 #[macro_use]
 extern crate enum_primitive_derive;
-extern crate failure;
-extern crate failure_derive;
 extern crate num_traits;
 
 mod alert;
@@ -20,6 +26,7 @@ mod handshake;
 mod handshaker;
 mod pack;
 mod record;
+mod session;
 //mod state;
 mod test;
 pub mod transport {
